@@ -1,0 +1,26 @@
+{
+  "name": "wt-cli",
+  "version": "0.1.0",
+  "description": "Git worktree CLI helper for task management",
+  "bin": {
+    "wt": "./wt"
+  },
+  "scripts": {
+    "postinstall": "chmod +x ./wt"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rickieplin/wt-cli.git"
+  },
+  "keywords": [
+    "git",
+    "worktree",
+    "cli",
+    "productivity"
+  ],
+  "author": "Your Name",
+  "license": "MIT",
+  "engines": {
+    "node": ">=10.0.0"
+  }
+}

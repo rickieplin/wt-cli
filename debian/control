@@ -1,0 +1,11 @@
+Package: wt-cli
+Version: 0.1.0
+Section: utils
+Priority: optional
+Architecture: all
+Depends: git, bash (>= 4.0)
+Maintainer: Your Name <your.email@example.com>
+Description: Git worktree CLI helper for task management
+ wt is a command-line tool that simplifies Git worktree operations
+ for managing multiple tasks simultaneously. It provides an intuitive
+ interface for creating, switching between, and cleaning up worktrees.
