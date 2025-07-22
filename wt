@@ -1,0 +1,193 @@
+#!/bin/bash
+
+set -e
+
+# Get the root directory of the current Git repository
+get_repo_dir() {
+    git rev-parse --show-toplevel 2>/dev/null
+}
+
+# Function to display help
+show_help() {
+    echo "🔧 Git Worktree CLI Helper (wt)"
+    echo ""
+    echo "Usage:"
+    echo "  wt start <task-name>    # Create new worktree with branch tmp/<task-name>"
+    echo "  wt cd <task-name>       # Change directory to worktree (opens subshell)"
+    echo "  wt list                 # List all current worktrees"
+    echo "  wt finish <task-name>   # Merge branch into main, remove worktree & branch"
+    echo "  wt delete <task-name>   # Remove worktree and branch without merging"
+    echo "  wt -h / --help / help   # Display this help message"
+    echo ""
+    echo "📁 Worktree location: ../<project>-<task-name>"
+    echo "🌿 Branch naming: tmp/<task-name>"
+    echo "🎯 Base branch: main"
+}
+
+# Check if we're in a Git repository
+check_git_repo() {
+    if ! git rev-parse --git-dir > /dev/null 2>&1; then
+        echo "❌ Error: Not in a Git repository"
+        exit 1
+    fi
+}
+
+# Main script logic
+case "$1" in
+    start)
+        if [ -z "$2" ]; then
+            echo "❌ Error: Please provide a task name"
+            echo "Usage: wt start <task-name>"
+            exit 1
+        fi
+        
+        check_git_repo
+        REPO_DIR=$(get_repo_dir)
+        TASK_NAME="$2"
+        BRANCH_NAME="tmp/$TASK_NAME"
+        PROJECT_NAME=$(basename "$REPO_DIR")
+        WORKTREE_DIR="$REPO_DIR/../$PROJECT_NAME-$TASK_NAME"
+        
+        echo "🚀 Creating worktree: $TASK_NAME"
+        
+        # Check if branch already exists
+        if git show-ref --verify --quiet "refs/heads/$BRANCH_NAME"; then
+            echo "❌ Error: Branch $BRANCH_NAME already exists"
+            exit 1
+        fi
+        
+        # Check if worktree already exists
+        if [ -d "$WORKTREE_DIR" ]; then
+            echo "❌ Error: Worktree directory $WORKTREE_DIR already exists"
+            exit 1
+        fi
+        
+        git worktree add "$WORKTREE_DIR" -b "$BRANCH_NAME" main
+        echo "✅ Worktree created at $WORKTREE_DIR"
+        echo "🌿 Branch: $BRANCH_NAME"
+        ;;
+        
+    cd)
+        if [ -z "$2" ]; then
+            echo "❌ Error: Please provide a task name"
+            echo "Usage: wt cd <task-name>"
+            exit 1
+        fi
+        
+        check_git_repo
+        REPO_DIR=$(get_repo_dir)
+        TASK_NAME="$2"
+        PROJECT_NAME=$(basename "$REPO_DIR")
+        WORKTREE_DIR="$REPO_DIR/../$PROJECT_NAME-$TASK_NAME"
+        
+        if [ -d "$WORKTREE_DIR" ]; then
+            echo "📁 Entering $WORKTREE_DIR"
+            cd "$WORKTREE_DIR" || exit
+            exec $SHELL
+        else
+            echo "❌ Error: Worktree not found: $WORKTREE_DIR"
+            echo "💡 Tip: Use 'wt list' to see available worktrees"
+            exit 1
+        fi
+        ;;
+        
+    list)
+        check_git_repo
+        echo "📋 Current worktrees:"
+        git worktree list
+        ;;
+        
+    finish)
+        if [ -z "$2" ]; then
+            echo "❌ Error: Please provide a task name"
+            echo "Usage: wt finish <task-name>"
+            exit 1
+        fi
+        
+        check_git_repo
+        REPO_DIR=$(get_repo_dir)
+        TASK_NAME="$2"
+        BRANCH_NAME="tmp/$TASK_NAME"
+        PROJECT_NAME=$(basename "$REPO_DIR")
+        WORKTREE_DIR="$REPO_DIR/../$PROJECT_NAME-$TASK_NAME"
+        
+        echo "🧩 Merging $BRANCH_NAME into main and cleaning up"
+        
+        # Check if branch exists
+        if ! git show-ref --verify --quiet "refs/heads/$BRANCH_NAME"; then
+            echo "❌ Error: Branch $BRANCH_NAME not found"
+            exit 1
+        fi
+        
+        # Save current branch
+        CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+        
+        # Switch to main branch
+        cd "$REPO_DIR"
+        git checkout main
+        
+        # Merge the branch
+        echo "📥 Merging $BRANCH_NAME into main..."
+        git merge "$BRANCH_NAME"
+        
+        # Remove worktree
+        echo "🧹 Removing worktree..."
+        git worktree remove "$WORKTREE_DIR" --force 2>/dev/null || true
+        
+        # Delete branch
+        echo "🗑️  Deleting branch $BRANCH_NAME..."
+        git branch -D "$BRANCH_NAME"
+        
+        echo "✅ Finished and cleaned up $TASK_NAME"
+        ;;
+        
+    delete)
+        if [ -z "$2" ]; then
+            echo "❌ Error: Please provide a task name"
+            echo "Usage: wt delete <task-name>"
+            exit 1
+        fi
+        
+        check_git_repo
+        REPO_DIR=$(get_repo_dir)
+        TASK_NAME="$2"
+        BRANCH_NAME="tmp/$TASK_NAME"
+        PROJECT_NAME=$(basename "$REPO_DIR")
+        WORKTREE_DIR="$REPO_DIR/../$PROJECT_NAME-$TASK_NAME"
+        
+        echo "🧹 Deleting worktree $TASK_NAME and its branch"
+        
+        # Remove worktree
+        if git worktree list | grep -q "$WORKTREE_DIR"; then
+            git worktree remove "$WORKTREE_DIR" --force
+            echo "✅ Removed worktree"
+        else
+            echo "⚠️  Worktree not found, skipping..."
+        fi
+        
+        # Delete branch
+        if git show-ref --verify --quiet "refs/heads/$BRANCH_NAME"; then
+            git branch -D "$BRANCH_NAME"
+            echo "✅ Deleted branch $BRANCH_NAME"
+        else
+            echo "⚠️  Branch $BRANCH_NAME not found, skipping..."
+        fi
+        
+        echo "✅ Cleanup complete"
+        ;;
+        
+    -h|--help|help)
+        show_help
+        ;;
+        
+    *)
+        if [ -z "$1" ]; then
+            show_help
+        else
+            echo "❌ Error: Unknown command '$1'"
+            echo ""
+            show_help
+            exit 1
+        fi
+        ;;
+esac
