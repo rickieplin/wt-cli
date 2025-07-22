@@ -1,0 +1,14 @@
+# Development files
+.git/
+.gitignore
+install.sh
+Makefile
+
+# Distribution files for other package managers
+Formula/
+debian/
+*.tar.gz
+
+# Documentation source
+*.md
+!README.md

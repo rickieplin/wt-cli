@@ -18,7 +18,11 @@
     "cli",
     "productivity"
   ],
-  "author": "Your Name",
+  "author": "Rickie Lin",
+  "bugs": {
+    "url": "https://github.com/rickieplin/wt-cli/issues"
+  },
+  "homepage": "https://github.com/rickieplin/wt-cli#readme",
   "license": "MIT",
   "engines": {
     "node": ">=10.0.0"
