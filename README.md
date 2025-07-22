@@ -24,11 +24,31 @@ A simple and intuitive command-line tool for managing Git worktrees, making it e
 - Bash shell
 - Linux/macOS/WSL environment
 
-### Installation Steps
+### Quick Installation
+
+#### Option 1: One-line installer
+```bash
+git clone https://github.com/rickieplin/wt-cli.git ~/tools/wt-cli && cd ~/tools/wt-cli && ./install.sh
+```
+
+#### Option 2: Manual installation
 
 1. Clone this repository:
    ```bash
-   git clone ~/tools/wt-cli
+   git clone https://github.com/rickieplin/wt-cli.git ~/tools/wt-cli
+   ```
+
+2. Run the installer:
+   ```bash
+   cd ~/tools/wt-cli
+   ./install.sh
+   ```
+
+#### Option 3: Manual steps
+
+1. Clone this repository:
+   ```bash
+   git clone https://github.com/rickieplin/wt-cli.git ~/tools/wt-cli
    ```
 
 2. Make the script executable:
