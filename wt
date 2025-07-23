@@ -10,21 +10,43 @@ get_repo_dir() {
     git rev-parse --show-toplevel 2>/dev/null
 }
 
+# Get default branch
+get_default_branch() {
+    # Try to get from remote HEAD
+    local default_branch=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@')
+    
+    # If that fails, check common branch names
+    if [ -z "$default_branch" ]; then
+        for branch in main master develop; do
+            if git show-ref --verify --quiet "refs/heads/$branch"; then
+                default_branch="$branch"
+                break
+            fi
+        done
+    fi
+    
+    # Fallback to main
+    echo "${default_branch:-main}"
+}
+
 # Function to display help
 show_help() {
+    local default_branch=$(get_default_branch)
+    
     echo "🔧 Git Worktree CLI Helper (wt) v$VERSION"
     echo ""
     echo "Usage:"
     echo "  wt start <task-name>    # Create new worktree with branch tmp/<task-name>"
+    echo "  wt start <task-name> --from <branch>  # Create worktree from specific branch"
     echo "  wt cd <task-name>       # Change directory to worktree (opens subshell)"
     echo "  wt list                 # List all current worktrees"
-    echo "  wt finish <task-name>   # Merge branch into main, remove worktree & branch"
+    echo "  wt finish <task-name>   # Merge branch into default branch, remove worktree & branch"
     echo "  wt delete <task-name>   # Remove worktree and branch without merging"
     echo "  wt -h / --help / help   # Display this help message"
     echo ""
     echo "📁 Worktree location: ../<project>-<task-name>"
     echo "🌿 Branch naming: tmp/<task-name>"
-    echo "🎯 Base branch: main"
+    echo "🎯 Default branch: $default_branch"
 }
 
 # Check if we're in a Git repository
@@ -35,12 +57,82 @@ check_git_repo() {
     fi
 }
 
+# Function to select branch interactively
+select_branch() {
+    local current_branch=$(git rev-parse --abbrev-ref HEAD)
+    local branches=()
+    local branch_count=0
+    local default_choice=1
+    
+    echo "Select base branch for 'tmp/$1':"
+    echo ""
+    
+    # Get all branches (local and remote)
+    while IFS= read -r branch; do
+        branch=$(echo "$branch" | sed 's/^\*//g' | xargs)
+        if [ -n "$branch" ] && [ "$branch" != "->" ]; then
+            branches+=("$branch")
+            ((branch_count++))
+            
+            # Check if this is the current branch
+            if [ "$branch" = "$current_branch" ]; then
+                echo "  $branch_count) $branch ← (current)"
+                default_choice=$branch_count
+            else
+                echo "  $branch_count) $branch"
+            fi
+        fi
+    done < <(git branch -a --format='%(refname:short)' | grep -v '^origin/HEAD' | sort -u)
+    
+    ((branch_count++))
+    echo "  $branch_count) [Enter custom branch name]"
+    echo ""
+    
+    # Read user choice
+    read -p "Please select (1-$branch_count) [$default_choice]: " choice
+    
+    # Use default if empty
+    if [ -z "$choice" ]; then
+        choice=$default_choice
+    fi
+    
+    # Validate choice
+    if ! [[ "$choice" =~ ^[0-9]+$ ]] || [ "$choice" -lt 1 ] || [ "$choice" -gt "$branch_count" ]; then
+        echo "❌ Invalid selection"
+        return 1
+    fi
+    
+    # Handle custom branch input
+    if [ "$choice" -eq "$branch_count" ]; then
+        read -p "Enter branch name: " SELECTED_BRANCH
+        if [ -z "$SELECTED_BRANCH" ]; then
+            echo "❌ Branch name cannot be empty"
+            return 1
+        fi
+    else
+        SELECTED_BRANCH="${branches[$((choice-1))]}"
+    fi
+    
+    # Remove remote prefix if present
+    SELECTED_BRANCH=$(echo "$SELECTED_BRANCH" | sed 's|^origin/||')
+    
+    # Verify branch exists
+    if ! git show-ref --verify --quiet "refs/heads/$SELECTED_BRANCH" && 
+       ! git show-ref --verify --quiet "refs/remotes/origin/$SELECTED_BRANCH"; then
+        echo "❌ Error: Branch '$SELECTED_BRANCH' not found"
+        return 1
+    fi
+    
+    echo "✓ Selected base branch: $SELECTED_BRANCH"
+    return 0
+}
+
 # Main script logic
 case "$1" in
     start)
         if [ -z "$2" ]; then
             echo "❌ Error: Please provide a task name"
-            echo "Usage: wt start <task-name>"
+            echo "Usage: wt start <task-name> [--from <branch>]"
             exit 1
         fi
         
@@ -52,6 +144,7 @@ case "$1" in
         WORKTREE_DIR="$REPO_DIR/../$PROJECT_NAME-$TASK_NAME"
         
         echo "🚀 Creating worktree: $TASK_NAME"
+        echo ""
         
         # Check if branch already exists
         if git show-ref --verify --quiet "refs/heads/$BRANCH_NAME"; then
@@ -65,7 +158,30 @@ case "$1" in
             exit 1
         fi
         
-        git worktree add "$WORKTREE_DIR" -b "$BRANCH_NAME" main
+        # Handle --from option
+        if [ "$3" = "--from" ] && [ -n "$4" ]; then
+            SELECTED_BRANCH="$4"
+            echo "Using specified base branch: $SELECTED_BRANCH"
+        else
+            # Interactive branch selection
+            if ! select_branch "$TASK_NAME"; then
+                exit 1
+            fi
+        fi
+        
+        echo ""
+        echo "Creating:"
+        echo "  - Worktree: $WORKTREE_DIR"
+        echo "  - Branch: $BRANCH_NAME (from $SELECTED_BRANCH)"
+        echo ""
+        read -p "Proceed? [Y/n]: " confirm
+        
+        if [ "$confirm" = "n" ] || [ "$confirm" = "N" ]; then
+            echo "❌ Cancelled"
+            exit 1
+        fi
+        
+        git worktree add "$WORKTREE_DIR" -b "$BRANCH_NAME" "$SELECTED_BRANCH"
         echo "✅ Worktree created at $WORKTREE_DIR"
         echo "🌿 Branch: $BRANCH_NAME"
         ;;
@@ -86,7 +202,19 @@ case "$1" in
         if [ -d "$WORKTREE_DIR" ]; then
             echo "📁 Entering $WORKTREE_DIR"
             cd "$WORKTREE_DIR" || exit
-            exec $SHELL
+            # Detect shell and execute appropriately
+            if [ -n "$SHELL" ]; then
+                exec "$SHELL"
+            elif [ -n "$BASH" ]; then
+                exec "$BASH"
+            elif command -v bash >/dev/null 2>&1; then
+                exec bash
+            elif command -v sh >/dev/null 2>&1; then
+                exec sh
+            else
+                echo "⚠️  Could not detect shell, using sh"
+                exec sh
+            fi
         else
             echo "❌ Error: Worktree not found: $WORKTREE_DIR"
             echo "💡 Tip: Use 'wt list' to see available worktrees"
@@ -114,7 +242,10 @@ case "$1" in
         PROJECT_NAME=$(basename "$REPO_DIR")
         WORKTREE_DIR="$REPO_DIR/../$PROJECT_NAME-$TASK_NAME"
         
-        echo "🧩 Merging $BRANCH_NAME into main and cleaning up"
+        # Get default branch
+        DEFAULT_BRANCH=$(get_default_branch)
+        
+        echo "🧩 Merging $BRANCH_NAME into $DEFAULT_BRANCH and cleaning up"
         
         # Check if branch exists
         if ! git show-ref --verify --quiet "refs/heads/$BRANCH_NAME"; then
@@ -125,12 +256,12 @@ case "$1" in
         # Save current branch
         CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
         
-        # Switch to main branch
+        # Switch to default branch
         cd "$REPO_DIR"
-        git checkout main
+        git checkout "$DEFAULT_BRANCH"
         
         # Merge the branch
-        echo "📥 Merging $BRANCH_NAME into main..."
+        echo "📥 Merging $BRANCH_NAME into $DEFAULT_BRANCH..."
         git merge "$BRANCH_NAME"
         
         # Remove worktree
